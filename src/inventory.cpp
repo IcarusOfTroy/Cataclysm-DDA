@@ -491,17 +491,33 @@ void inventory::restack( Character &p )
     }
 
     // combine matching stacks
-    // separate loop to ensure that ALL stacks are homogeneous
+    // group by typeId to avoid N^2 stacks_with check
+    std::unordered_map<itype_id, std::vector<invstack::iterator>> by_type;
     for( invstack::iterator iter = items.begin(); iter != items.end(); ++iter ) {
-        for( invstack::iterator other = iter; other != items.end(); ++other ) {
-            if( iter != other && iter->front().stacks_with( other->front() ) ) {
-                if( other->front().count_by_charges() ) {
-                    iter->front().charges += other->front().charges;
-                } else {
-                    iter->splice( iter->begin(), *other );
+        by_type[iter->front().typeId()].push_back( iter );
+    }
+
+    for( auto &pair : by_type ) {
+        auto &bucket = pair.second;
+        for( size_t i = 0; i < bucket.size(); ++i ) {
+            invstack::iterator iter = bucket[i];
+            if( iter == items.end() ) {
+                continue; // already merged and erased
+            }
+            for( size_t j = i + 1; j < bucket.size(); ++j ) {
+                invstack::iterator other = bucket[j];
+                if( other == items.end() ) {
+                    continue;
                 }
-                other = items.erase( other );
-                --other;
+                if( iter->front().stacks_with( other->front() ) ) {
+                    if( other->front().count_by_charges() ) {
+                        iter->front().charges += other->front().charges;
+                    } else {
+                        iter->splice( iter->begin(), *other );
+                    }
+                    items.erase( other );
+                    bucket[j] = items.end(); // mark as erased
+                }
             }
         }
     }

@@ -1488,54 +1488,71 @@ bool inventory_column::collated_sort_compare( inventory_entry const &lhs,
 
 void inventory_column::collate()
 {
-    for( auto outer = entries.begin(); outer != entries.end(); ++outer ) {
-        if( !outer->is_item() || outer->is_collated() || outer->chevron ) {
-            continue;
-        }
-        for( auto e = std::next( outer ); e != entries.end(); ) {
-            if( e->is_item() && e->get_category_ptr() == outer->get_category_ptr() &&
-                e->any_item()->is_favorite == outer->any_item()->is_favorite &&
-                e->any_item()->typeId() == outer->any_item()->typeId() &&
-                std::min( 0, e->any_item()->link_length() ) == std::min( 0, outer->any_item()->link_length() ) &&
-                e->any_item()->max_link_length() == outer->any_item()->max_link_length() &&
-                ( !indent_entries() ||
-                  e->any_item().parent_item() == outer->any_item().parent_item() ) &&
-                ( e->is_collation_header() || !e->chevron ) &&
-                e->any_item()->is_same_relic( *outer->any_item() ) ) {
+    entries_t new_entries;
+    std::unordered_map<itype_id, std::vector<size_t>> headers_by_type;
 
-                if( !outer->is_collated() ) {
-                    outer->collation_meta = std::make_shared<collation_meta_t>(
-                                                collation_meta_t{ outer->any_item(), true, outer->is_selectable() } );
+    for( size_t i = 0; i < entries.size(); ++i ) {
+        inventory_entry &e = entries[i];
 
-                    entries_hidden.emplace_back( *outer );
+        bool merged = false;
+        if( e.is_item() && ( e.is_collation_header() || !e.chevron ) ) {
+            auto bucket_it = headers_by_type.find( e.any_item()->typeId() );
+            if( bucket_it != headers_by_type.end() ) {
+                for( size_t header_idx : bucket_it->second ) {
+                    inventory_entry &outer = new_entries[header_idx];
 
-                    outer->chevron = true;
-                    set_collapsed( *outer, true );
-                    outer->reset_entry_cell_cache(); // needed when switching UI modes
+                    if( e.get_category_ptr() == outer.get_category_ptr() &&
+                        e.any_item()->is_favorite == outer.any_item()->is_favorite &&
+                        std::min( 0, e.any_item()->link_length() ) == std::min( 0, outer.any_item()->link_length() ) &&
+                        e.any_item()->max_link_length() == outer.any_item()->max_link_length() &&
+                        ( !indent_entries() ||
+                          e.any_item().parent_item() == outer.any_item().parent_item() ) &&
+                        e.any_item()->is_same_relic( *outer.any_item() ) ) {
+
+                        if( !outer.is_collated() ) {
+                            outer.collation_meta = std::make_shared<collation_meta_t>(
+                                                        collation_meta_t{ outer.any_item(), true, outer.is_selectable() } );
+
+                            entries_hidden.emplace_back( outer );
+
+                            outer.chevron = true;
+                            set_collapsed( outer, true );
+                            outer.reset_entry_cell_cache(); // needed when switching UI modes
+                        }
+                        e.collation_meta = outer.collation_meta;
+                        std::copy( e.locations.begin(), e.locations.end(),
+                                   std::back_inserter( outer.locations ) );
+                        entries_hidden.emplace_back( std::move( e ) );
+                        merged = true;
+                        break;
+                    }
                 }
-                e->collation_meta = outer->collation_meta;
-                std::copy( e->locations.begin(), e->locations.end(),
-                           std::back_inserter( outer->locations ) );
-                entries_hidden.emplace_back( std::move( *e ) );
-                e = entries.erase( e );
-            } else {
-                ++e;
+            }
+        }
+
+        if( !merged ) {
+            new_entries.push_back( std::move( e ) );
+            inventory_entry &added = new_entries.back();
+            if( added.is_item() && !added.is_collated() && !added.chevron ) {
+                headers_by_type[added.any_item()->typeId()].push_back( new_entries.size() - 1 );
             }
         }
     }
+    
+    entries = std::move( new_entries );
     _collated = true;
 }
 
 void inventory_column::_reset_collation( entries_t &entries )
 {
-    for( auto iter = entries.begin(); iter != entries.end(); ) {
-        if( iter->is_collation_header() ) {
-            iter = entries.erase( iter );
-        } else {
-            iter->reset_collation();
-            ++iter;
+    entries.erase( std::remove_if( entries.begin(), entries.end(),
+    []( inventory_entry & entry ) {
+        if( entry.is_collation_header() ) {
+            return true;
         }
-    }
+        entry.reset_collation();
+        return false;
+    } ), entries.end() );
 }
 
 void inventory_column::uncollate()

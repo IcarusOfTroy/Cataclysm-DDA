@@ -52,3 +52,22 @@ TEST_CASE( "inventory_form_from_map_bulk_batching", "[inventory][map]" )
     CHECK( inv.count_item( itype_stick ) == 15 );
     CHECK( inv.count_item( itype_string_36 ) == 5 );
 }
+
+TEST_CASE( "inventory_restack_performance", "[inventory][restack]" )
+{
+    inventory inv;
+    item rock( itype_rock, calendar::turn );
+    
+    // Add a lot of individual items
+    std::vector<item> rocks;
+    for( int i = 0; i < 500; ++i ) {
+        rocks.push_back( rock );
+    }
+    inv.add_items_bulk( std::move( rocks ), false, false, false );
+    
+    // This should finish quickly if restack doesn't have an O(N^2) stacks_with check
+    Character &dummy = get_avatar(); // A dummy character to use for restack
+    inv.restack( dummy );
+    
+    CHECK( inv.count_item( itype_rock ) == 500 );
+}
